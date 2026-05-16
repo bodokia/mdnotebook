@@ -6,6 +6,7 @@ import {
   List, ListOrdered, ListChecks,
   Quote, Code, Minus,
   Link as LinkIcon, Unlink,
+  Undo2, Redo2,
 } from 'lucide-react'
 
 interface Props {
@@ -69,6 +70,24 @@ export default function FormatToolbar({ editor }: Props) {
         className="flex items-center gap-0.5 px-2 py-1 overflow-x-auto"
         style={{ scrollbarWidth: 'none' }}
       >
+        {/* Undo / Redo */}
+        <Btn
+          onClick={() => editor.chain().focus().undo().run()}
+          title="Отменить (⌘Z)"
+          disabled={!editor.can().undo()}
+        >
+          <Undo2 size={14} />
+        </Btn>
+        <Btn
+          onClick={() => editor.chain().focus().redo().run()}
+          title="Повторить (⌘⇧Z)"
+          disabled={!editor.can().redo()}
+        >
+          <Redo2 size={14} />
+        </Btn>
+
+        <Sep />
+
         {/* Headings */}
         <Btn
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}

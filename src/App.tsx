@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { FileNode, fetchFiles, fetchFileContent, saveFile, createFile, createFolder, deleteFile, renameFile, setAuthToken } from './api'
+import {
+  FileNode, TrashItem,
+  fetchFiles, fetchFileContent, saveFile, createFile, createFolder,
+  renameFile, setAuthToken,
+  fetchTrash, moveToTrash, restoreFromTrash, deleteFromTrash, emptyTrash,
+  uploadFiles,
+} from './api'
 import Sidebar from './components/Sidebar'
 import Editor from './components/Editor'
 import Preview from './components/Preview'
@@ -31,6 +37,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
   const [theme, setTheme] = useTheme()
   const [fileTree, setFileTree] = useState<FileNode[]>([])
+  const [trashItems, setTrashItems] = useState<TrashItem[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [content, setContent] = useState('')
   const [savedContent, setSavedContent] = useState('')
@@ -58,11 +65,14 @@ export default function App() {
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedIndicatorRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingDeletesRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-  // FIX-07: ref to preview container for scroll reset
   const previewContainerRef = useRef<HTMLDivElement>(null)
 
   const isDirty = content !== savedContent
+
+  const addToast = useCallback((message: string) => {
+    const id = `toast-${Date.now()}`
+    setToasts(prev => [...prev, { id, message, duration: 3000 }])
+  }, [])
 
   const loadFiles = useCallback(async () => {
     try {
@@ -73,7 +83,21 @@ export default function App() {
     }
   }, [])
 
-  useEffect(() => { if (session) loadFiles() }, [session, loadFiles])
+  const loadTrash = useCallback(async () => {
+    try {
+      const items = await fetchTrash()
+      setTrashItems(items)
+    } catch (e) {
+      console.error('Failed to load trash', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (session) {
+      loadFiles()
+      loadTrash()
+    }
+  }, [session, loadFiles, loadTrash])
 
   const doSave = useCallback(async (path: string, value: string) => {
     setSaveStatus('saving')
@@ -81,7 +105,6 @@ export default function App() {
       await saveFile(path, value)
       setSavedContent(value)
       setSaveStatus('saved')
-      // FIX-12: clear "saved" indicator after 2 seconds
       if (savedIndicatorRef.current) clearTimeout(savedIndicatorRef.current)
       savedIndicatorRef.current = setTimeout(() => setSaveStatus('idle'), 2000)
     } catch {
@@ -104,7 +127,6 @@ export default function App() {
       setSavedContent(text)
       setSelectedPath(path)
       setSaveStatus('idle')
-      // FIX-07: reset preview scroll
       setTimeout(() => { if (previewContainerRef.current) previewContainerRef.current.scrollTop = 0 }, 0)
     } finally {
       setLoading(false)
@@ -136,50 +158,90 @@ export default function App() {
   }, [loadFiles, openFile])
 
   const handleCreateFolder = useCallback(async (path: string) => {
-    await createFolder(path)
-    await loadFiles()
+    try {
+      await createFolder(path)
+      await loadFiles()
+    } catch (e) {
+      console.error('Failed to create folder', e)
+      alert(`Не удалось создать папку: ${(e as Error).message}`)
+    }
   }, [loadFiles])
 
-  // FIX-05: delete with undo toast (delayed actual deletion)
-  const handleDelete = useCallback((path: string) => {
+  const handleDelete = useCallback(async (path: string, type: 'file' | 'folder') => {
     // Optimistically remove from UI
     setFileTree(prev => removeNodeFromTree(prev, path))
-    if (selectedPath === path) {
+    if (selectedPath === path || (type === 'folder' && selectedPath?.startsWith(path + '/'))) {
       setSelectedPath(null)
       setContent('')
       setSavedContent('')
     }
 
-    const toastId = `del-${Date.now()}`
-    const timer = setTimeout(async () => {
-      pendingDeletesRef.current.delete(path)
-      try {
-        await deleteFile(path)
-      } catch {
-        // If deletion failed, reload to restore
-        loadFiles()
-      }
-    }, 5000)
-    pendingDeletesRef.current.set(path, timer)
-
-    const toast: ToastItem = {
-      id: toastId,
-      message: `Удалено: ${path.split('/').pop()?.replace(/\.md$/, '')}`,
-      onUndo: () => {
-        const t = pendingDeletesRef.current.get(path)
-        if (t) { clearTimeout(t); pendingDeletesRef.current.delete(path) }
-        loadFiles() // restore from server
-      },
-      duration: 5000,
+    try {
+      await moveToTrash(path, type)
+      await loadTrash()
+      addToast(`«${path.split('/').pop()}» перемещено в корзину`)
+    } catch (e) {
+      console.error('Failed to move to trash', e)
+      await loadFiles() // restore UI on failure
+      addToast('Не удалось переместить в корзину')
     }
-    setToasts(prev => [...prev, toast])
-  }, [selectedPath, loadFiles])
+  }, [selectedPath, loadFiles, loadTrash, addToast])
 
   const handleRename = useCallback(async (oldPath: string, newPath: string) => {
     await renameFile(oldPath, newPath)
     if (selectedPath === oldPath) setSelectedPath(newPath)
     await loadFiles()
   }, [selectedPath, loadFiles])
+
+  const handleRestore = useCallback(async (trashId: string) => {
+    try {
+      await restoreFromTrash(trashId)
+      await Promise.all([loadFiles(), loadTrash()])
+      addToast('Восстановлено из корзины')
+    } catch (e) {
+      console.error('Failed to restore', e)
+      addToast('Не удалось восстановить')
+    }
+  }, [loadFiles, loadTrash, addToast])
+
+  const handleDeleteFromTrash = useCallback(async (trashId: string) => {
+    try {
+      await deleteFromTrash(trashId)
+      setTrashItems(prev => prev.filter(i => i.id !== trashId))
+    } catch (e) {
+      console.error('Failed to delete from trash', e)
+      addToast('Не удалось удалить')
+    }
+  }, [addToast])
+
+  const handleUpload = useCallback(async (files: File[], folder: string) => {
+    try {
+      const fileData = await Promise.all(
+        files.map(f => f.text().then(content => ({ name: f.name, content })))
+      )
+      const results = await uploadFiles(fileData, folder)
+      const failed = results.filter(r => !r.ok)
+      await loadFiles()
+      if (failed.length === 0) {
+        addToast(`Загружено: ${results.length} ${results.length === 1 ? 'файл' : 'файлов'}`)
+      } else {
+        addToast(`Загружено: ${results.length - failed.length}, ошибок: ${failed.length}`)
+      }
+    } catch (e) {
+      console.error('Upload error:', e)
+      addToast(`Ошибка загрузки: ${(e as Error).message}`)
+    }
+  }, [loadFiles, addToast])
+
+  const handleEmptyTrash = useCallback(async () => {
+    try {
+      await emptyTrash()
+      setTrashItems([])
+    } catch (e) {
+      console.error('Failed to empty trash', e)
+      addToast('Не удалось очистить корзину')
+    }
+  }, [addToast])
 
   const dismissToast = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id))
@@ -189,7 +251,6 @@ export default function App() {
 
   const fileName = selectedPath ? selectedPath.split('/').pop() : null
 
-  // Still resolving session
   if (session === undefined) {
     return (
       <div className="flex h-screen items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}>
@@ -200,21 +261,28 @@ export default function App() {
 
   if (!session) return <AuthScreen />
 
+  const sidebarProps = {
+    fileTree,
+    selectedPath,
+    onSelect: openFile,
+    onCreate: handleCreate,
+    onCreateFolder: handleCreateFolder,
+    onDelete: handleDelete,
+    onRename: handleRename,
+    onUpload: handleUpload,
+    trashItems,
+    onRestore: handleRestore,
+    onDeleteFromTrash: handleDeleteFromTrash,
+    onEmptyTrash: handleEmptyTrash,
+    theme,
+    onToggleTheme: toggleTheme,
+  }
+
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--bg)', color: 'var(--text)' }}>
       {/* Sidebar — desktop always visible */}
       <div className="hidden md:flex flex-shrink-0" style={{ width: 260, borderRight: '1px solid var(--border)' }}>
-        <Sidebar
-          fileTree={fileTree}
-          selectedPath={selectedPath}
-          onSelect={openFile}
-          onCreate={handleCreate}
-          onCreateFolder={handleCreateFolder}
-          onDelete={handleDelete}
-          onRename={handleRename}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-        />
+        <Sidebar {...sidebarProps} />
       </div>
 
       {/* Mobile sidebar drawer */}
@@ -226,17 +294,7 @@ export default function App() {
             onClick={() => setSidebarOpen(false)}
           />
           <div className="fixed inset-y-0 left-0 z-50 md:hidden" style={{ width: 280 }}>
-            <Sidebar
-              fileTree={fileTree}
-              selectedPath={selectedPath}
-              onSelect={openFile}
-              onCreate={handleCreate}
-              onCreateFolder={handleCreateFolder}
-              onDelete={handleDelete}
-              onRename={handleRename}
-              theme={theme}
-              onToggleTheme={toggleTheme}
-            />
+            <Sidebar {...sidebarProps} />
           </div>
         </>
       )}
@@ -245,7 +303,6 @@ export default function App() {
       <div className="flex flex-col flex-1 min-w-0">
         {/* Toolbar */}
         <div className="flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--surface)' }}>
-          {/* FIX-04: mobile hamburger with min 44px */}
           <button
             className="md:hidden flex items-center justify-center rounded"
             style={{ minWidth: 44, minHeight: 44, color: 'var(--text-muted)' }}
@@ -260,7 +317,6 @@ export default function App() {
                 {fileName.replace(/\.md$/, '')}
               </span>
             )}
-            {/* FIX-06 + FIX-12: save status indicator */}
             {saveStatus === 'error' && (
               <span className="text-xs font-medium" style={{ color: '#f87171' }}>
                 ⚠ Ошибка сохранения
@@ -276,7 +332,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Sign out */}
           <button
             onClick={() => supabase.auth.signOut()}
             className="hidden md:flex items-center px-2 py-1 rounded text-xs"
@@ -286,7 +341,6 @@ export default function App() {
             Выйти
           </button>
 
-          {/* View mode — desktop */}
           <div className="hidden md:flex items-center gap-1">
             {(['editor', 'split', 'preview'] as ViewMode[]).map(mode => (
               <button
@@ -303,7 +357,6 @@ export default function App() {
             ))}
           </div>
 
-          {/* FIX-04: mobile view buttons with minHeight 44px */}
           <div className="flex md:hidden items-center gap-1">
             {(['editor', 'preview'] as ViewMode[]).map(mode => (
               <button
@@ -339,7 +392,6 @@ export default function App() {
                 className="flex-1 min-w-0 overflow-hidden"
                 style={{ borderRight: viewMode === 'split' ? '1px solid var(--border)' : undefined }}
               >
-                {/* FIX-07: key resets Editor (incl. TipTap) on file switch */}
                 <Editor
                   key={selectedPath}
                   content={content}
@@ -349,7 +401,6 @@ export default function App() {
               </div>
             )}
             {(viewMode === 'preview' || viewMode === 'split') && (
-              /* FIX-07: ref for scroll reset */
               <div ref={previewContainerRef} className="flex-1 min-w-0 overflow-y-auto">
                 <Preview content={content} theme={theme} />
               </div>
@@ -358,13 +409,11 @@ export default function App() {
         )}
       </div>
 
-      {/* FIX-05: undo-delete toast */}
       <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   )
 }
 
-// Helper: remove a file node from the tree by path
 function removeNodeFromTree(nodes: FileNode[], path: string): FileNode[] {
   return nodes.flatMap(node => {
     if (node.path === path) return []

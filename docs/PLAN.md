@@ -21,6 +21,7 @@
 - [x] `POST /api/folder/create` — создать папку (`.keep` placeholder)
 - [x] `DELETE /api/file` — удалить файл
 - [x] `PATCH /api/file/rename` — переименовать (copy + delete)
+- [x] `POST /api/files/upload` — загрузка нескольких `.md` файлов в корень или папку
 - [x] `tsx --env-file=.env server.ts` — корректная загрузка `.env`
 
 ### Frontend
@@ -32,6 +33,8 @@
 - [x] `src/components/Editor.tsx` — TipTap-редактор, автосохранение 2 сек
 - [x] `src/components/Preview.tsx` — react-markdown + syntax highlight
 - [x] `src/components/Toast.tsx` — undo-toast при удалении
+- [x] Загрузка файлов — кнопка `↑` в хедере (корень) и в контексте папки; поддержка нескольких файлов сразу
+- [x] Undo/Redo — кнопки в FormatToolbar (WYSIWYG); нативный `Cmd+Z`/`Cmd+Shift+Z` работает в обоих режимах
 
 ---
 

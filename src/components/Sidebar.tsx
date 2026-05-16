@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useMemo } from 'react'
-import { FileNode } from '../api'
+import { useState, useRef, useCallback, useMemo, useId } from 'react'
+import { FileNode, TrashItem } from '../api'
 
 interface Props {
   fileTree: FileNode[]
@@ -7,13 +7,17 @@ interface Props {
   onSelect: (path: string) => void
   onCreate: (path: string) => void
   onCreateFolder: (path: string) => void
-  onDelete: (path: string) => void
+  onDelete: (path: string, type: 'file' | 'folder') => void
   onRename: (oldPath: string, newPath: string) => void
+  onUpload: (files: File[], folder: string) => void
+  trashItems: TrashItem[]
+  onRestore: (trashId: string) => void
+  onDeleteFromTrash: (trashId: string) => void
+  onEmptyTrash: () => void
   theme: 'light' | 'dark'
   onToggleTheme: () => void
 }
 
-// What we're currently creating inline
 type CreatingState =
   | { type: 'file'; parentPath: string }
   | { type: 'folder'; parentPath: string }
@@ -25,9 +29,10 @@ interface NodeProps {
   expandedDirs: Set<string>
   onToggleDir: (path: string) => void
   onSelect: (path: string) => void
-  onDelete: (path: string) => void
+  onDelete: (path: string, type: 'file' | 'folder') => void
   onRename: (oldPath: string, newPath: string) => void
   onStartCreate: (state: CreatingState) => void
+  onStartUpload: (folderPath: string) => void
   creating: CreatingState
   onCommitCreate: (name: string) => void
   onCancelCreate: () => void
@@ -74,6 +79,7 @@ function FileNodeItem({
   onDelete,
   onRename,
   onStartCreate,
+  onStartUpload,
   creating,
   onCommitCreate,
   onCancelCreate,
@@ -90,7 +96,6 @@ function FileNodeItem({
   const indent = depth * 14
   const showActions = hovering || isSelected
 
-  // FIX-01: long-press for mobile
   const handleTouchStart = useCallback(() => {
     longPressRef.current = setTimeout(() => setHovering(true), 500)
   }, [])
@@ -167,19 +172,27 @@ function FileNodeItem({
           </span>
         )}
 
-        {/* FIX-01: show actions on hover (desktop) or selected (mobile) */}
         {!renaming && showActions && (
           <div className="flex items-center gap-0.5 ml-1 shrink-0" onClick={e => e.stopPropagation()}>
-            {/* FIX-10: + button for folders */}
             {node.type === 'folder' && (
-              <button
-                className="text-xs px-1 rounded hover:opacity-70"
-                style={{ color: isSelected ? '#fff' : 'var(--text-muted)', minWidth: 22, minHeight: 22 }}
-                onClick={e => { e.stopPropagation(); onStartCreate({ type: 'file', parentPath: node.path }) }}
-                title="Новая заметка в папке"
-              >
-                +
-              </button>
+              <>
+                <button
+                  className="text-xs px-1 rounded hover:opacity-70"
+                  style={{ color: isSelected ? '#fff' : 'var(--text-muted)', minWidth: 22, minHeight: 22 }}
+                  onClick={e => { e.stopPropagation(); onStartCreate({ type: 'file', parentPath: node.path }) }}
+                  title="Новая заметка в папке"
+                >
+                  +
+                </button>
+                <button
+                  className="text-xs px-1 rounded hover:opacity-70"
+                  style={{ color: isSelected ? '#fff' : 'var(--text-muted)', minWidth: 22, minHeight: 22 }}
+                  onClick={e => { e.stopPropagation(); onStartUpload(node.path) }}
+                  title="Загрузить файлы в папку"
+                >
+                  ↑
+                </button>
+              </>
             )}
             <button
               className="text-xs px-1 rounded hover:opacity-70"
@@ -189,21 +202,18 @@ function FileNodeItem({
             >
               ✎
             </button>
-            {node.type === 'file' && (
-              <button
-                className="text-xs px-1 rounded hover:opacity-70"
-                style={{ color: isSelected ? '#ffaaaa' : '#f87171', minWidth: 22, minHeight: 22 }}
-                onClick={e => { e.stopPropagation(); onDelete(node.path) }}
-                title="Удалить"
-              >
-                ✕
-              </button>
-            )}
+            <button
+              className="text-xs px-1 rounded hover:opacity-70"
+              style={{ color: isSelected ? '#ffaaaa' : '#f87171', minWidth: 22, minHeight: 22 }}
+              onClick={e => { e.stopPropagation(); onDelete(node.path, node.type) }}
+              title="В корзину"
+            >
+              ✕
+            </button>
           </div>
         )}
       </div>
 
-      {/* Inline input for new file inside this folder (FIX-02, FIX-10) */}
       {isCreatingHere && isExpanded && (
         <div
           className="flex items-center"
@@ -231,13 +241,13 @@ function FileNodeItem({
               onDelete={onDelete}
               onRename={onRename}
               onStartCreate={onStartCreate}
+              onStartUpload={onStartUpload}
               creating={creating}
               onCommitCreate={onCommitCreate}
               onCancelCreate={onCancelCreate}
               depth={depth + 1}
             />
           ))}
-          {/* Inline input for new file in folder (when folder is not yet open) */}
           {isCreatingHere && !isExpanded && (
             <div
               className="flex items-center"
@@ -271,13 +281,43 @@ function filterTree(nodes: FileNode[], query: string): FileNode[] {
   })
 }
 
+function formatRelativeDate(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'только что'
+  if (mins < 60) return `${mins} мин. назад`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} ч. назад`
+  const days = Math.floor(hours / 24)
+  return `${days} дн. назад`
+}
+
 export default function Sidebar({
   fileTree, selectedPath, onSelect, onCreate, onCreateFolder,
-  onDelete, onRename, theme, onToggleTheme,
+  onDelete, onRename, onUpload,
+  trashItems, onRestore, onDeleteFromTrash, onEmptyTrash,
+  theme, onToggleTheme,
 }: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState<CreatingState>(null)
+  const [trashOpen, setTrashOpen] = useState(false)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const uploadFolderRef = useRef<string>('')
+  const uploadInputId = useId()
+
+  const startUpload = useCallback((folderPath: string) => {
+    uploadFolderRef.current = folderPath
+    uploadInputRef.current?.click()
+  }, [])
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length > 0) {
+      onUpload(files, uploadFolderRef.current)
+    }
+    e.target.value = ''
+  }, [onUpload])
 
   const toggleDir = (path: string) => {
     setExpandedDirs(prev => {
@@ -306,16 +346,33 @@ export default function Sidebar({
 
   const cancelCreate = useCallback(() => setCreating(null), [])
 
-  // FIX-08: filter tree by search query
   const visibleTree = useMemo(() => filterTree(fileTree, search), [fileTree, search])
 
   return (
     <div className="flex flex-col h-full w-full" style={{ backgroundColor: 'var(--surface)' }}>
+      {/* Hidden file input for upload */}
+      <input
+        id={uploadInputId}
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        accept=".md,text/markdown,text/plain"
+        className="hidden"
+        onChange={handleFileInputChange}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5" style={{ borderBottom: '1px solid var(--border)' }}>
         <span className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Заметки</span>
         <div className="flex items-center gap-0.5">
-          {/* FIX-11: create folder */}
+          <button
+            onClick={() => startUpload('')}
+            className="flex items-center justify-center rounded text-sm"
+            style={{ minWidth: 30, minHeight: 30, color: 'var(--text-muted)' }}
+            title="Загрузить файлы"
+          >
+            ↑
+          </button>
           <button
             onClick={() => startCreateRoot('folder')}
             className="flex items-center justify-center rounded text-xs"
@@ -324,7 +381,6 @@ export default function Sidebar({
           >
             □+
           </button>
-          {/* FIX-02: create note with inline input */}
           <button
             onClick={() => startCreateRoot('file')}
             className="flex items-center justify-center rounded text-xl"
@@ -344,7 +400,7 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* FIX-08: Search field */}
+      {/* Search */}
       <div className="px-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
         <input
           type="search"
@@ -362,7 +418,6 @@ export default function Sidebar({
 
       {/* File tree */}
       <div className="flex-1 overflow-y-auto py-2 px-1">
-        {/* Inline input at root level */}
         {creating && creating.parentPath === '' && (
           <div className="flex items-center px-3 py-1.5">
             <span className="text-xs mr-1" style={{ color: 'var(--text-muted)' }}>
@@ -392,12 +447,87 @@ export default function Sidebar({
               onDelete={onDelete}
               onRename={onRename}
               onStartCreate={setCreating}
+              onStartUpload={startUpload}
               creating={creating}
               onCommitCreate={commitCreate}
               onCancelCreate={cancelCreate}
               depth={0}
             />
           ))
+        )}
+      </div>
+
+      {/* Trash section */}
+      <div style={{ borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+        <div
+          className="flex items-center justify-between px-3 cursor-pointer select-none"
+          style={{ paddingTop: 8, paddingBottom: 8 }}
+          onClick={() => setTrashOpen(v => !v)}
+        >
+          <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+            <span>{trashOpen ? '▾' : '▸'}</span>
+            <span>Корзина{trashItems.length > 0 ? ` (${trashItems.length})` : ''}</span>
+          </span>
+          {trashItems.length > 0 && (
+            <button
+              className="text-xs px-1.5 py-0.5 rounded hover:opacity-70"
+              style={{ color: '#f87171' }}
+              title="Очистить корзину"
+              onClick={e => { e.stopPropagation(); onEmptyTrash() }}
+            >
+              Очистить
+            </button>
+          )}
+        </div>
+
+        {trashOpen && (
+          <div className="pb-2" style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {trashItems.length === 0 ? (
+              <p className="text-xs px-4 py-1" style={{ color: 'var(--text-muted)' }}>
+                Корзина пуста
+              </p>
+            ) : (
+              trashItems.map(item => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded mx-1"
+                  style={{ minHeight: 36 }}
+                >
+                  <span className="text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
+                    {item.type === 'folder' ? '📁' : '📄'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="text-xs truncate"
+                      style={{ color: 'var(--text)' }}
+                      title={item.name.replace(/\.md$/, '')}
+                    >
+                      {item.name.replace(/\.md$/, '')}
+                    </div>
+                    <div className="text-xs truncate" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+                      {formatRelativeDate(item.deletedAt)}
+                    </div>
+                  </div>
+                  <button
+                    className="text-xs px-1 rounded hover:opacity-70 shrink-0"
+                    style={{ color: 'var(--accent)', minWidth: 22, minHeight: 22 }}
+                    title="Восстановить"
+                    onClick={() => onRestore(item.id)}
+                  >
+                    ↩
+                  </button>
+                  <button
+                    className="text-xs px-1 rounded hover:opacity-70 shrink-0"
+                    style={{ color: '#f87171', minWidth: 22, minHeight: 22 }}
+                    title="Удалить навсегда"
+                    onClick={() => onDeleteFromTrash(item.id)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         )}
       </div>
     </div>

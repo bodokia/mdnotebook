@@ -85,6 +85,10 @@ export default function Editor({ content, onChange, onSave }: Props) {
       onSave()
       return
     }
+    // Let browser handle native undo/redo in textarea
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+      return
+    }
     if (e.key === 'Tab') {
       e.preventDefault()
       const el = textareaRef.current!

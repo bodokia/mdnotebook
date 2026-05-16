@@ -39,3 +39,17 @@ npm run dev     # tsx --env-file=.env server.ts + Vite — оба процесс
 ## Стек (кратко)
 
 React 18 + Vite + TypeScript · Tailwind CSS v3 + @tailwindcss/typography · TipTap (редактор) · react-markdown + remark-gfm + rehype-highlight · Express.js (tsx) · Supabase Auth + Storage · Шрифты: Inter / Lora / JetBrains Mono
+
+---
+
+## Правило: обновление документации
+
+**После каждой добавленной функции или API-эндпоинта — обязательно обнови соответствующий документ:**
+
+| Что изменилось | Какой файл обновить |
+|----------------|---------------------|
+| Новая фича завершена / задача выполнена | `docs/PLAN.md` — отметь как сделанное, обнови backlog |
+| Новый API-эндпоинт или изменение backend-логики | `docs/ARCHITECTURE.md` — добавь в раздел API |
+| Изменение UI, шрифтов, цветов, layout | `docs/DESIGN.md` — зафикси дизайн-решение |
+
+Это правило применяется к изменениям в `server.ts` и файлах в `src/`.
