@@ -37,6 +37,87 @@ body {
   font-family: 'JetBrains Mono', 'Menlo', monospace;
 }
 
+/* ─── TipTap / ProseMirror ─────────────────────────────────────── */
+.wysiwyg-editor .ProseMirror {
+  outline: none;
+  min-height: 60vh;
+  color: var(--text);
+  caret-color: var(--accent);
+}
+
+.wysiwyg-editor .ProseMirror p { margin: 0.6em 0; }
+.wysiwyg-editor .ProseMirror p:first-child { margin-top: 0; }
+
+.wysiwyg-editor .ProseMirror h1,
+.wysiwyg-editor .ProseMirror h2,
+.wysiwyg-editor .ProseMirror h3 {
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.1em 0 0.4em;
+}
+.wysiwyg-editor .ProseMirror h1 { font-size: 1.75rem; }
+.wysiwyg-editor .ProseMirror h2 { font-size: 1.375rem; }
+.wysiwyg-editor .ProseMirror h3 { font-size: 1.125rem; }
+
+.wysiwyg-editor .ProseMirror code {
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  background: var(--surface);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+.wysiwyg-editor .ProseMirror pre {
+  background: var(--surface) !important;
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+.wysiwyg-editor .ProseMirror pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+.wysiwyg-editor .ProseMirror ul,
+.wysiwyg-editor .ProseMirror ol { padding-left: 1.5em; margin: 0.4em 0; }
+.wysiwyg-editor .ProseMirror li { margin: 0.2em 0; }
+
+.wysiwyg-editor .ProseMirror blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1em;
+  color: var(--text-muted);
+  margin: 0.8em 0;
+}
+
+.wysiwyg-editor .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+
+.wysiwyg-editor .ProseMirror a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* Task list */
+.wysiwyg-editor .ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.25em;
+}
+.wysiwyg-editor .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+.wysiwyg-editor .ProseMirror ul[data-type="taskList"] li > label {
+  margin-top: 0.15em;
+  cursor: pointer;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

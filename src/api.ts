@@ -5,8 +5,25 @@ export interface FileNode {
   children?: FileNode[]
 }
 
+let authToken: string | null = null
+
+export function setAuthToken(token: string | null) {
+  authToken = token
+}
+
 async function request(url: string, options?: RequestInit): Promise<Response> {
-  const res = await fetch(url, options)
+  const headers: Record<string, string> = {
+    ...(options?.headers as Record<string, string>),
+  }
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`
+  }
+
+  const res = await fetch(url, { ...options, headers })
+  if (res.status === 401) {
+    if (authToken) window.location.reload() // токен был, но истёк — перезагружаем
+    throw new Error('Unauthorized')
+  }
   if (!res.ok) throw new Error(`${options?.method ?? 'GET'} ${url} → ${res.status}`)
   return res
 }
@@ -46,5 +63,13 @@ export async function renameFile(oldPath: string, newPath: string): Promise<void
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ oldPath, newPath }),
+  })
+}
+
+export async function createFolder(path: string): Promise<void> {
+  await request('/api/folder/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
   })
 }
